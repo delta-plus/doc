@@ -67,7 +67,7 @@ The following examples will use a HackTheBox lab environment with user and flag 
   
 The "extract" script provides examples of automatic data extraction/ingestion using Nmap and NetExec.  
 `extract -n [IP] [name]` will create a basic info card using results from nmap.  
-![doc1](examples/doc1.png)
+![doc](examples/doc.png)
   
 Observe how `$(doc [name] ip)` can be used in place of addresses.  
 If you have access to a bastion host like this one, you can use `extract -s -p [network address]` to scan for Windows hosts on the internal network via SMB.  
