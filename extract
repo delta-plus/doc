@@ -1,0 +1,76 @@
+#!/bin/bash
+
+here="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+hosts="$here/hosts"
+host_names=$(doc list names)
+host_ips=$(doc list ips)
+
+lower() {
+  text=$(</dev/stdin)
+  echo "$text" | tr '[:upper:]' '[:lower:]'
+}
+
+if [[ "$1" == '-s' ]]; then
+  if [[ "$2" == '-p' ]]; then
+    scan=$(proxychains nxc smb "$3"/24 2>&1 | rg '\[\*\]')
+  else
+    scan=$(nxc smb "$2"/24 | rg '\[\*\]')
+  fi
+
+  names=$(echo "$scan" | tr -s ' ' | cut -d ' ' -f 4)
+  ips=$(echo "$scan" | tr -s ' ' | cut -d ' ' -f 2)
+  oss=$(echo "$scan" | tr -s ' ' | sd '.*\] ' '' | sd ' \(.*' '')
+  max=$(echo "$ips" | wc -l)
+  
+  for x in $(seq 1 $max); do
+    name=$(echo "$names" | sed -n "$x"p)
+    ip=$(echo "$ips" | sed -n "$x"p)
+    os=$(echo "$oss" | sed -n "$x"p)
+  
+    if ! echo "$host_ips" | rg -q "^$ip$"; then
+      doc -c "$name"
+    else
+      num=$(echo "$host_ips" | grep -n "^$ip$" | cut -d ':' -f 1)
+      old=$(echo "$host_names" | sed -n "$num"p)
+      doc -u "$old" name "$name"
+      name=$(echo "$name" | lower)
+      if [[ "$old" != "$name" ]]; then
+        mv "$hosts/$old.json" "$hosts/$name.json"
+      fi
+    fi
+  
+    doc -u "$name" ip "$ip"
+    doc -u "$name" os "$os"
+    doc -u "$name" ports 445
+  done
+elif [[ "$1" -eq '-n' ]]; then
+  ip="$2"
+  if [[ -n "$3" ]]; then
+    name="$3"
+  else
+    name="$ip"
+  fi
+
+  if nmap -sn -T4 "$ip" > /dev/null; then
+    if ! echo "$host_ips" | rg -q "^$ip$" && ! echo "$host_names" | rg -q "^$name$"; then
+      doc -c "$name"
+      doc -u "$name" ip "$ip"
+      doc -u "$name" url "http://$ip"
+    fi
+    temp=$(mktemp)
+    sudo nmap -sS -T4 -p- "$ip" | rg -o '[0-9]+/' | tr -d '/' >> "$temp"
+    for port in $(cat "$temp"); do
+      if ! doc "$name" ports | jq -r .[].number | rg -q "^$port$"; then doc -u "$name" ports "$port"; fi
+    done
+    if cat "$temp" | rg -q '^80$'; then
+      if curl -sI "http://$ip" | rg -q '^Server:.*Ubuntu.*'; then
+        doc -u "$name" os Ubuntu
+      fi
+    elif cat "$temp" | rg -q '^443$'; then
+      if curl -skI "https://$ip" | rg -q '^Server:.*Ubuntu.*'; then
+        doc -u "$name" os Ubuntu
+      fi
+    fi
+    rm "$temp"
+  fi
+fi

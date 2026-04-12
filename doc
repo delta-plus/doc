@@ -1,0 +1,399 @@
+#!/bin/bash
+
+read -r -d '' usage << EOF
+    ____  ____  ______
+   / __ \/ __ \/ ____/
+  / / / / / / / /     
+ / /_/ / /_/ / /___   
+/_____/\____/\____/   
+
+Documentation, Of Course!
+
+doc -c [name]                  - Create new host info card.
+doc -u [name] [field] [value]  - Update host info.
+doc [host name(s)]             - Print info cards for the provided hosts.
+doc all                        - Print all host cards at once! (Work-in-progress. Needs formatting.)
+doc all [text]                 - Print host cards whose names or IPs include the provided text.
+doc list                       - List the names and IPs of all hosts.
+doc list names                 - List the names of all hosts.
+doc list ips                   - List the IPs of all hosts.
+doc list -p [port]             - List the IPs of all hosts with a certain port.
+doc clear                      - Clear the card cache. Useful if editing host JSON directly.
+doc target [name]              - Define a particular host as the current target for "doc x".
+doc x [...]                    - Useful for scripting. If another script uses "doc x", you can set targets for it dynamically.
+doc conf                       - Display doc's current settings.
+doc conf [setting] [value]     - Edit doc's settings. (Work-in-progress.)
+EOF
+
+IFS=$'\n'
+here="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+hosts="$here/hosts"
+templates="$here/templates"
+cache="$here/cache"
+
+create=''
+update=''
+delete=''
+
+setting() {
+  [[ $(jq --arg key "$1" '.[$key]' templates/config.json) == 'true' ]]
+}
+
+upper() {
+  text=$(</dev/stdin)
+  echo "$text" | tr '[:lower:]' '[:upper:]'
+}
+
+lower() {
+  text=$(</dev/stdin)
+  echo "$text" | tr '[:upper:]' '[:lower:]'
+}
+
+bold() {
+  bld=$(tput bold)
+  nrm=$(tput sgr0)
+  
+  while IFS= read -r x; do
+    echo "${bld}$x${nrm}"
+  done <<< $(</dev/stdin)
+}
+
+unbold() {
+  text=$(</dev/stdin)
+  echo "$text" | sed -E $'s/\x1B(\[[0-9;]*[a-zA-Z]|\([A-Za-z])//g'
+}
+
+color() {
+  declare -A clrs
+  clrs[y]='\033[33m'
+  clrs[r]='\033[31m'
+  text=$(</dev/stdin)
+  clr="${clrs[$1]}"
+  nrm=$(tput sgr0)
+  echo -e "${clr}$text${nrm}"
+}
+
+multiprint() {
+  perl -e "print \"$1\" x $2"
+  echo
+}
+
+mkbox() {
+read -r -d '' pytxt << EOF
+import sys
+
+def bold(text):
+  return f"\\033[1m{text}\\033[0m"
+
+def mkbox(val, style, line):
+  vlen = len(val)
+  cols = vlen + 2
+
+  if style == '-b':
+    val = bold(val)
+    h = '━'
+    v = '┃'
+    lt = '┣'
+    rt = '┫'
+    ut = '┳'
+    dt = '┻'
+    ct = '╋'
+    c1 = '┏'
+    c2 = '┓'
+    c3 = '┗'
+    c4 = '┛'
+  else:
+    h = '─'
+    v = '│'
+    lt = '├'
+    rt = '┤'
+    ut = '┬'
+    dt = '┴'
+    ct = '┼'
+    c1 = '┌'
+    c2 = '┐'
+    c3 = '└'
+    c4 = '┘'
+
+  sect = h * cols
+  if cols % 2 == 0:
+    line_s = h * int(cols / 2 - 1) + ut + h * int(cols / 2)
+  else:
+    line_s = h * int(cols / 2) + ut + h * int(cols / 2)
+
+  if line == 'n':
+    top = f"{c1}{sect}{c2}"
+    mid = f"\\n{v} {val} {v}"
+    bot = f"\\n{c3}{sect}{c4}"
+  elif line == 'e':
+    top = f"{c1}{sect}{c2}"
+    mid = f"\\n{v} {val} {v}"
+    bot = f"\\n{c3}{sect}{c4}"
+  elif line == 's':
+    top = f"{c1}{sect}{c2}"
+    mid = f"\\n{v} {val} {v}"
+    bot = f"\\n{c3}{line_s}{c4}"
+  elif line == 'w':
+    top = f"{c1}{sect}{c2}"
+    mid = f"\\n{v} {val} {v}"
+    bot = f"\\n{c3}{sect}{c4}"
+  else:
+    top = f"{c1}{sect}{c2}"
+    mid = f"\\n{v} {val} {v}"
+    bot = f"\\n{c3}{sect}{c4}"
+
+  return f"{top}{mid}{bot}"
+
+if sys.argv[1] == '-b':
+  print(mkbox(sys.argv[2], '-b', ''))
+elif sys.argv[1] == '-h':
+  print(mkbox(sys.argv[3], '', sys.argv[2]))
+else:
+  print(mkbox(sys.argv[1], '', ''))
+EOF
+
+  python3 -c "$pytxt" $@
+}
+
+pad() {
+  max="$1"
+  input=$(</dev/stdin)
+  size=$(echo "$input" | wc -l)
+  diff=$((max - size))
+  
+  if [[ "$diff" -gt 0 ]]; then
+    echo "$input"
+    for x in $(seq 1 $diff); do
+      echo ' '
+    done
+  else
+    echo "$input"
+  fi
+}
+
+multidoc() {
+  max=0
+  hosts=''
+  notes=''
+  
+  hosts="$1"
+  first=$(echo "$hosts" | head -n 1)
+  notes=$(doc "$first" | sd '━' ';')
+  
+  for x in $hosts; do
+    len=$(doc "$x" | wc -l)
+    if [[ "$len" -gt "$max" ]]; then
+      max="$len"
+    fi
+  done
+  
+  notes=$(echo "$notes" | pad "$max")
+  hosts=$(echo "$hosts" | sed 1d)
+  
+  for x in $hosts; do
+    notes=$(paste <(echo "$notes" | unbold | expand -t 4 | sd '$' '​') <(doc "$x" | sd '━' ';' | unbold | pad "$max") | column -t -s '​' | head -n -1)
+  done
+
+  header=$(echo "$notes" | sed -n 1,3p)
+  line=$(echo "$header" | sed -n 2p)
+  line2=$(echo $line | bold)
+  header=$(echo "$header" | sd "$line" "$line2" | sd ';' '━') 
+  body=$(echo "$notes" | sed 1,3d)
+
+  for x in $(echo "$body" | rg -o '[A-Z\-]+:'); do
+    body=$(echo "$body" | sd "$x" "$(echo $x | bold)")
+  done
+
+  for x in $(echo "$body" | rg -o '\[.\]'); do
+    if echo "$x" | rg -q '\?'; then
+      new=$(echo '[?]' | bold | color y)
+      body=$(echo "$body" | sd "\[\?\]" "$new")
+    elif echo "$x" | rg -q '!'; then
+      new=$(echo '[!]' | bold | color r)
+      body=$(echo "$body" | sd "\[!\]" "$new")
+    else
+      mid=$(echo "$x" | cut -c 2)
+      new=$(echo "$x" | bold)
+      body=$(echo "$body" | sd "\[$mid\]" "$new")
+    fi
+  done
+
+  echo "$header"
+  echo "$body"
+}
+
+while getopts "c:u:" opt; do
+  case ${opt} in
+    c) create="$OPTARG" ;;
+    u) update="$OPTARG" ;;
+  esac
+done 2>/dev/null
+
+if [[ -n "$create" ]]; then
+  create=$(echo "$create" | lower)
+  cp "$templates/host.json" "$hosts/$create.json"
+  new=$(jq -r --argjson x "\"$create\"" '.name = $x' "$hosts/$create.json")
+  echo "$new" > "$hosts/$create.json"
+  rm "$cache/$create" 2>/dev/null
+  doc "$create" > /dev/null
+
+elif [[ -n "$update" ]]; then
+  update=$(echo "$update" | lower)
+  if [[ "$3" == 'users' ]]; then
+    if [[ -n "$5" ]]; then
+      user=$(jq -r --arg name "$4" --arg pass "$5" '.name = $name | .pass = $pass' "$templates/user.json")
+    else
+      user=$(jq -r --arg name "$4" '.name = $name' "$templates/user.json")
+    fi
+    new=$(jq -r --argjson user "$user" --arg name "$4" \
+     'if any(.users[]; .name == $name) then
+        .users |= map(if .name == $name then $user else . end)
+      else
+        .users += [$user]
+      end' "$hosts/$update.json")
+  elif [[ "$3" == 'ports' ]]; then
+    if [[ "$4" == '5985' ]]; then
+      service='WINRM'
+    else
+      service=$(getent services "$4" | awk '{print $1}' | upper)
+      if [[ -z "$service" ]]; then
+        service='???'
+      elif [[ "$4" == '80' ]]; then
+        host=$(cat "$hosts/$update.json")
+        if [[ $(echo "$host" | jq -r .url) == '???' ]]; then
+          doc -u "$update" url http://$(echo "$host" | jq -r .ip)
+        fi
+      elif [[ "$4" == '443' ]]; then
+        host=$(cat "$hosts/$update.json")
+        if [[ $(echo "$host" | jq -r .url) == '???' ]]; then
+          doc -u "$update" url https://$(echo "$host" | jq -r .ip)
+        fi
+      fi
+    fi
+    port=$(jq -r --arg number "$4" --arg service "$service" '.number = $number | .service = $service' "$templates/port.json")
+    new=$(jq -r --argjson x "$port" '.ports += [$x]' "$hosts/$update.json")
+  elif [[ "$3" == 'todo' ]]; then
+    todo=$(cat "$hosts/$update.json" | jq -r .todo)
+    if [[ "$todo" != '[]' ]]; then
+      states=$(echo "$todo" | jq -r .[].state)
+      items=$(echo "$todo" | jq -r .[].item)
+      todo=$(paste -d ' ' <(echo "$states") <(echo "$items"))
+    else
+      todo=''
+    fi
+    temp=$(mktemp)
+    echo "$todo" > $temp
+    $EDITOR $temp
+    todo='[]'
+    while IFS= read -r x; do
+      state=$(echo "$x" | rg -o '[ ]*\[.\]')
+      item=$(echo "$x" | rg '\[.\]' | sd '[ ]*\[.\] ' '')
+      new=$(jq -r --argjson x "\"$item\"" '.item = $x' "$templates/todo.json")
+      new=$(echo "$new" | jq -r --argjson x "\"$state\"" '.state = $x' | jq -c)
+      todo=$(echo "$todo" | sd ']$' "$new,]")
+    done <<< $(cat $temp | rg '[ ]*\[.\]')
+    rm $temp
+    todo=$(echo "$todo" | sd ',]$' ']')
+    new=$(jq -r --argjson x "$todo" ".todo = \$x" "$hosts/$update.json")
+  else
+    new=$(jq -r --argjson x "\"$4\"" ".$3 = \$x" "$hosts/$update.json")
+  fi
+
+  echo "$new" > "$hosts/$update.json"
+  rm "$cache/$update" 2>/dev/null
+  doc "$update" > /dev/null
+
+elif [[ -f "$hosts/$1.json" ]]; then
+  host=$(cat "$hosts/$1.json")
+  m=1
+  for x in $@; do
+    if ! [[ -f "$hosts/$x.json" ]]; then
+      m=0
+    fi
+  done
+  if [[ "$m" -eq 1 ]] && [[ $# -gt 1 ]]; then
+    multidoc "$(echo $@ | tr ' ' '\n')"
+  elif [[ $# -eq 2 ]] && [[ $(echo "$host" | jq -r ".$2") != 'null' ]]; then
+    echo "$host" | jq -r ".$2"
+  elif [[ $# -eq 1 ]]; then
+    if ! [[ -f "$cache/$1" ]]; then
+      output=$(
+        mkbox -b $(echo $1 | upper)
+        echo "$(echo OS: | bold)  $(echo "$host" | jq -r .os)"
+        echo "$(echo IP: | bold)  $(echo "$host" | jq -r .ip)"
+        echo "$(echo URL: | bold) $(echo "$host" | jq -r .url)"
+        echo
+        ports=$(echo "$host" | jq -r .ports)
+        if [[ "$ports" != '[]' ]]; then
+          portnums=$(echo "$ports" | jq -r .[].number)
+          portnames=$(echo "$ports" | jq -r .[].service)
+          echo PORTS: | bold
+          paste <(echo "$portnums" | sd '$' '​') <(echo "$portnames") | column -t -s '​' -o ' -' | head -n -1 | sort -g
+          echo
+        fi
+        users=$(echo "$host" | jq -r .users)
+        if [[ "$users" != '[]' ]]; then
+          names=$(echo "$users" | jq -r .[].name)
+          passes=$(echo "$users" | jq -r .[].pass)
+          echo USERS: | bold
+          paste <(echo "$names" | sd '$' '​') <(echo "$passes") | column -t -s '​' -o ' -' | head -n -1
+          echo
+        fi
+        todo=$(echo "$host" | jq -r .todo)
+        if [[ "$todo" != '[]' ]]; then
+          states=$(echo $todo | jq -r .[].state | bold)
+          items=$(echo $todo | jq -r .[].item)
+          lines=$(echo "$states" | wc -l)
+          echo TO-DO: | bold
+          for x in $(seq 1 $lines); do
+            state=$(echo "$states" | sed -n "$x"p)
+            item=$(echo "$items" | sed -n "$x"p)
+            if echo "$state" | rg -q '\?'; then state=$(echo "$state" | color y); fi
+            if echo "$state" | rg -q '!'; then state=$(echo "$state" | color r); fi
+            echo "$state $item"
+          done
+        fi
+      )
+      echo "$output" > "$cache/$1"
+    fi
+    cat "$cache/$1"
+  fi
+elif [[ "$1" == 'all' ]]; then
+  if [[ -n "$2" ]]; then
+    list=$(doc list | rg "$2" | head -n 6 | cut -d '-' -f 1 | tr -d ' ')
+    multidoc "$list"
+  else
+    list=$(doc list | head -n 6 | cut -d '-' -f 1 | tr -d ' ')
+    multidoc "$list"
+  fi
+elif [[ "$1" == 'list' ]]; then
+  files=$(ls "$hosts" | rg '\.json$')
+  names=$(echo "$files" | sd '.json$' '')
+  if [[ -z "$names" ]]; then
+    echo 'No hosts found.'
+    exit 1
+  fi
+  ips=$(cat $hosts/* | jq -r .ip)
+  if [[ "$2" == 'names' ]]; then
+    echo "$names"
+  elif [[ "$2" == 'ips' ]]; then
+    echo "$ips"
+  elif [[ "$2" == '-p' ]]; then
+    while IFS= read -r x; do
+      host=$(cat "$hosts/$x")
+      if echo "$host" | jq -r '.ports[].number' | rg -q "^$3$"; then
+        echo "$host" | jq -r '.ip'
+      fi
+    done <<< $(echo "$files")
+  else
+    paste <(echo "$names" | sd '$' '​') <(echo "$ips") | column -t -s '​' -o '  -' | head -n -1 | sort -g
+  fi
+elif [[ "$1" == 'target' ]]; then
+  echo "$2" > "$hosts/target"
+elif [[ "$1" == 'x' ]]; then
+  doc $(cat "$hosts/target") "${@:2}"
+elif [[ "$1" == 'clear' ]]; then
+  rm "$cache"/*
+else
+  echo "    $usage"; echo; exit 1
+fi
