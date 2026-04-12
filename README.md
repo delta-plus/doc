@@ -16,7 +16,7 @@ With doc, you'll always know what's up!
 • Optional GPG integration. (Work-in-progress. Might use `pass`...)  
   
 <b>Installation:</b>  
-Run `sudo apt-get install -y rg sd jq`  
+Run `sudo apt-get install -y ripgrep sd jq`  
 That should cover most functionality.  
   
 ## Usage  
