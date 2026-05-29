@@ -315,6 +315,22 @@ elif [[ -f "$hosts/$1.json" ]]; then
     multidoc "$(echo $@ | tr ' ' '\n')"
   elif [[ $# -eq 2 ]] && [[ $(echo "$host" | jq -r ".$2") != 'null' ]]; then
     echo "$host" | jq -r ".$2"
+  elif [[ "$2" == 'user' ]]; then
+    if [[ -z "$3" ]]; then
+      echo "$host" | jq -r .users[].name | tail -n 1
+    else
+      num="$3"
+      ((--num))
+      echo "$host" | jq -r .users[$num].name
+    fi
+  elif [[ "$2" == 'pass' ]]; then
+    if [[ -z "$3" ]]; then
+      echo "$host" | jq -r .users[].pass | tail -n 1
+    else
+      num="$3"
+      ((--num))
+      echo "$host" | jq -r .users[$num].pass
+    fi
   elif [[ $# -eq 1 ]]; then
     if ! [[ -f "$cache/$1" ]]; then
       output=$(
@@ -373,7 +389,7 @@ elif [[ "$1" == 'list' ]]; then
     echo 'No hosts found.'
     exit 1
   fi
-  ips=$(cat $hosts/* | jq -r .ip)
+  ips=$(cat "$hosts"/*.json | jq -r .ip)
   if [[ "$2" == 'names' ]]; then
     echo "$names"
   elif [[ "$2" == 'ips' ]]; then
