@@ -36,6 +36,14 @@ hosts="$here/hosts"
 templates="$here/templates"
 cache="$here/cache"
 
+if ! [[ -d "$hosts" ]]; then
+  mkdir "$hosts"
+fi
+
+if ! [[ -d "$cache" ]]; then
+  mkdir "$cache"
+fi
+
 create=''
 update=''
 delete=''
