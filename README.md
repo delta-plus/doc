@@ -21,6 +21,9 @@ That should cover most functionality.
   
 ## Usage  
 <b>Actions</b>  
+`doc -c [name]`               -  Create new host info card.
+`doc -u [name] [field] [x]`   -  Update host info.
+`doc -u [name] auto`          -  Attempt to find hostname and OS automatically.
 `doc [name] [property]`       -  Print property for a particular host.  
 `doc [name] [user|pass]`      -  Prints most recently added username or password.  
 `doc [name] [user|pass] [n]`  -  Prints nth username or password.  

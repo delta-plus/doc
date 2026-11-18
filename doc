@@ -9,18 +9,22 @@ read -r -d '' usage << EOF
 
 Documentation, Of Course!
 
-doc -c [name]                  - Create new host info card.
-doc -u [name] [field] [value]  - Update host info.
-doc [host name(s)]             - Print info cards for the provided hosts.
-doc all                        - Print all host cards at once! (Work-in-progress. Needs formatting.)
-doc all [text]                 - Print host cards whose names or IPs include the provided text.
-doc list                       - List the names and IPs of all hosts.
-doc list names                 - List the names of all hosts.
-doc list ips                   - List the IPs of all hosts.
-doc list -p [port]             - List the IPs of all hosts with a certain port.
-doc clear                      - Clear the card cache. Useful if editing host JSON directly.
-doc target [name]              - Define a particular host as the current target for "doc x".
-doc x [...]                    - Useful for scripting. If another script uses "doc x", you can set targets for it dynamically.
+doc -c [name]               -  Create new host info card.
+doc -u [name] [field] [x]   -  Update host info.
+doc -u [name] auto          -  Attempt to find hostname and OS automatically.
+doc [name] [property]       -  Print property for a particular host.  
+doc [name] [user|pass]      -  Prints most recently added username or password.  
+doc [name] [user|pass] [n]  -  Prints nth username or password.
+doc [name(s)]               -  Print info cards for the provided hosts.
+doc all                     -  Print all host cards at once!
+doc all [text]              -  Print host cards whose names or IPs include the provided text.
+doc list                    -  List the names and IPs of all hosts.
+doc list names              -  List the names of all hosts.
+doc list ips                -  List the IPs of all hosts.
+doc list -p [port]          -  List the IPs of all hosts with a certain port.
+doc clear                   -  Clear the card cache. Useful if editing host JSON directly.
+doc target [name]           -  Define a particular host as the current target for "doc x".
+doc x [...]                 -  Useful for scripting. If another script uses "doc x", you can set targets for it dynamically.
 EOF
 
 # Settings
