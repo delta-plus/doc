@@ -10,10 +10,10 @@ With doc, you'll always know what's up!
 • Useful for automation:  
   • Why remember and type a whole address when you can just do `$(doc [name] ip)` or `$(doc [name] url)`?  
   • Scan all hosts with a certain port like so: `for x in $(doc list -p [port number]); do [command] "$x"; done`  
-• Scripts for ingesting nmap and nxc output included.  
+• Ingests nmap and nxc output.  
 • Extensible - Just add JSON!  
 • Easily editable per-host to-do lists with built-in color coding.  
-• Optional GPG integration. (Work-in-progress. Might use `pass`...)  
+• Optional GPG integration.  
   
 <b>Installation:</b>  
 Run `sudo apt-get install -y ripgrep sd jq`  
@@ -21,35 +21,36 @@ That should cover most functionality.
   
 ## Usage  
 <b>Actions</b>  
-`doc [host name(s)]`: Print info cards for the provided hosts.  
-`doc all`: Print all host cards at once! (Work-in-progress. Needs formatting.)  
-`doc all [text]`: Print host cards whose names or IPs include the provided text.  
-`doc list`: List the names and IPs of all hosts.  
-`doc list names`: List the names of all hosts.  
-`doc list ips`: List the IPs of all hosts.  
-`doc list -p [port]`: List the IPs of all hosts with a certain port.  
-`doc clear`: Clear the card cache. Useful if editing host JSON directly.  
-`doc target [name]`: Define a particular host as the current target for `doc x`.  
-`doc x [...]`: Useful for scripting. If another script uses `doc x`, you can set targets for it dynamically.  
-`doc conf`: Display doc's current settings.  
-`doc conf [setting] [value]`: Edit doc's settings. (Work-in-progress.)  
+`doc [name] [property]`       -  Print property for a particular host.  
+`doc [name] [user|pass]`      -  Prints most recently added username or password.  
+`doc [name] [user|pass] [n]`  -  Prints nth username or password.  
+`doc [name(s)]`               -  Print info cards for the provided hosts.  
+`doc all`                     -  Print all host cards at once!  
+`doc all [text]`              -  Print host cards whose names or IPs include the provided text.  
+`doc list`                    -  List the names and IPs of all hosts.  
+`doc list names`              -  List the names of all hosts.  
+`doc list ips`                -  List the IPs of all hosts.  
+`doc list -p [port]`          -  List the IPs of all hosts with a certain port.  
+`doc clear`                   -  Clear the card cache. Useful if editing host JSON directly.  
+`doc target [name]`           -  Define a particular host as the current target for `doc x`.  
+`doc x [...]`                 -  Useful for scripting. If another script uses `doc x`, you can set targets for it dynamically.  
+
   
 <b>Updating Host Info</b>  
 New host cards are created using `doc -c [name]`.  
 In general, hosts are updated using the syntax `doc -u [name] [field] [value]`.  
+If a target exposes SMB or MSSQL, it may be possible to retrieve the host name and OS version with `doc -u [name] auto`.  
 
 Update ports:
 `doc -u [name] ports [number]`  
 If possible, the most likely service for that port will be added automatically.  
 The "os", "ip", and "url" fields can be updated similarly.  
+Running `doc -u [name] ports [file]` on an nmap scan log will add all found ports.
   
-Update users:  
-`doc -u [name] users [username]`  
-  
-Update passwords:  
-`doc -u [name] users [username] [password]`  
-If you want to add production credentials, please consider running `doc conf gpg true`.  
-This forces doc to use GPG when storing or retrieving host info.  
+Update credentials:   
+`doc -u [name] users [username] (password)`  
+For production credentials, please consider setting `use_gpg=1` in the settings at the top of the script.  
+This will ensure that passwords are stored GPG-encrypted using `pass`.  
   
 Update to-do list:  
 `doc -u [name] todo`  
@@ -66,6 +67,7 @@ After that, you can add a list like the one shown below.
 The following examples will use a HackTheBox lab environment with user and flag data replaced by sample text.  
   
 The "extract" script provides examples of automatic data extraction/ingestion using Nmap and NetExec.  
+Some of this functionality is now provided by `doc -u [name] ports [file]` and `doc -u [name] auto`.  
 `extract -n [IP] [name]` will create a basic info card using results from nmap.  
 ![doc](examples/doc.png)
   

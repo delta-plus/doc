@@ -21,9 +21,10 @@ doc list -p [port]             - List the IPs of all hosts with a certain port.
 doc clear                      - Clear the card cache. Useful if editing host JSON directly.
 doc target [name]              - Define a particular host as the current target for "doc x".
 doc x [...]                    - Useful for scripting. If another script uses "doc x", you can set targets for it dynamically.
-doc conf                       - Display doc's current settings.
-doc conf [setting] [value]     - Edit doc's settings. (Work-in-progress.)
 EOF
+
+# Settings
+use_gpg=0 # Store passwords GPG-encrypted
 
 IFS=$'\n'
 here="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
@@ -34,10 +35,6 @@ cache="$here/cache"
 create=''
 update=''
 delete=''
-
-setting() {
-  [[ $(jq --arg key "$1" '.[$key]' templates/config.json) == 'true' ]]
-}
 
 upper() {
   text=$(</dev/stdin)
@@ -63,6 +60,10 @@ unbold() {
   echo "$text" | sed -E $'s/\x1B(\[[0-9;]*[a-zA-Z]|\([A-Za-z])//g'
 }
 
+maxc() {
+  cat | awk '{ if (length($0) > max) max = length($0) } END { print max }'
+}
+
 color() {
   declare -A clrs
   clrs[y]='\033[33m'
@@ -76,6 +77,24 @@ color() {
 multiprint() {
   perl -e "print \"$1\" x $2"
   echo
+}
+
+page() {
+  if [[ -n "$2" ]]; then
+    input=$(cat)
+    pg="$2"
+    pgsz="$1"
+    max=$(echo "$input" | wc -l)
+    max2=$((pg * pgsz))
+  
+    if [[ $max -ge $max2 ]]; then
+      echo "$input" | head -n "$max2" | tail -n "$pgsz"
+    elif [[ $((max2 - max)) -lt $pgsz ]]; then
+      echo "$input" | tail -n $((max % pgsz))
+    fi
+  else
+    head -n $(("$1" * 40)) | tail -n 40
+  fi
 }
 
 mkbox() {
@@ -229,6 +248,10 @@ while getopts "c:u:" opt; do
   esac
 done 2>/dev/null
 
+if [[ -z "$1" ]]; then
+  echo "    $usage"; echo; exit 1
+fi
+
 if [[ -n "$create" ]]; then
   create=$(echo "$create" | lower)
   cp "$templates/host.json" "$hosts/$create.json"
@@ -241,7 +264,13 @@ elif [[ -n "$update" ]]; then
   update=$(echo "$update" | lower)
   if [[ "$3" == 'users' ]]; then
     if [[ -n "$5" ]]; then
-      user=$(jq -r --arg name "$4" --arg pass "$5" '.name = $name | .pass = $pass' "$templates/user.json")
+      if [[ "$use_gpg" -eq 0 ]]; then
+        user=$(jq -r --arg name "$4" --arg pass "$5" '.name = $name | .pass = $pass' "$templates/user.json")
+      else
+        pwnm="doc/$update/$4"
+        user=$(jq -r --arg name "$4" --arg pass "$pwnm" '.name = $name | .pass = $pass' "$templates/user.json")
+        echo "$5" | pass insert -e "$pwnm" > /dev/null
+      fi
     else
       user=$(jq -r --arg name "$4" '.name = $name' "$templates/user.json")
     fi
@@ -252,7 +281,13 @@ elif [[ -n "$update" ]]; then
         .users += [$user]
       end' "$hosts/$update.json")
   elif [[ "$3" == 'ports' ]]; then
-    if [[ "$4" == '5985' ]]; then
+    if [[ -f "$4" ]]; then
+      ports=$(cat "$4" | rg -o '[0-9]+/' | tr -d '/')
+      for port in $ports; do
+        if ! doc "$update" ports | jq -r .[].number | rg -q "^$port$"; then doc -u "$update" ports "$port"; fi
+      done
+      exit
+    elif [[ "$4" == '5985' ]]; then
       service='WINRM'
     else
       service=$(getent services "$4" | awk '{print $1}' | upper)
@@ -272,6 +307,29 @@ elif [[ -n "$update" ]]; then
     fi
     port=$(jq -r --arg number "$4" --arg service "$service" '.number = $number | .service = $service' "$templates/port.json")
     new=$(jq -r --argjson x "$port" '.ports += [$x]' "$hosts/$update.json")
+  elif [[ "$3" == 'auto' ]]; then 
+    ip=$(cat "$hosts/$update.json" | jq -r .ip)
+    ports=$(cat "$hosts/$update.json" | jq -r .ports[].number)
+    if echo "$ports" | rg -q '^445$'; then
+      smb=$(nxc smb "$ip" -u '' -p '')
+      name=$(echo "$smb" | field 4 | head -n 1)
+      os=$(echo "$smb" | rg -o '\[\*\] [^ ]+ [^ ]+ [^ ]+' | sd '\[\*\] ' '')
+    elif echo "$ports" | rg -q '^1443$'; then
+      name=$(mssqlclient.py :@"$ip" | rg '\[\-\]' | sd '.*\(' '' | sd '\).*' '')
+      os='Windows'
+    fi
+    doc -u "$update" os "$os"
+    doc -u "$update" name "$name"
+    exit
+  elif [[ "$3" == 'name' ]]; then
+    name=$(echo "$4" | lower)
+    mv "$hosts/$update.json" "$hosts/$name.json"
+    if [[ $(cat "$hosts/target") == "$update" ]]; then
+      doc target "$name"
+    fi
+    rm "$cache/$update" 2>/dev/null
+    update="$name"
+    new=$(jq -r --argjson x "\"$4\"" ".$3 = \$x" "$hosts/$update.json")
   elif [[ "$3" == 'todo' ]]; then
     todo=$(cat "$hosts/$update.json" | jq -r .todo)
     if [[ "$todo" != '[]' ]]; then
@@ -325,11 +383,23 @@ elif [[ -f "$hosts/$1.json" ]]; then
     fi
   elif [[ "$2" == 'pass' ]]; then
     if [[ -z "$3" ]]; then
-      echo "$host" | jq -r .users[].pass | tail -n 1
+      if [[ "$use_gpg" -eq 0 ]]; then
+        echo "$host" | jq -r .users[].pass | tail -n 1
+      else
+        pwnm=$(echo "$host" | jq -r .users[].pass | tail -n 1)
+        pass "$pwnm"
+      fi
     else
-      num="$3"
-      ((--num))
-      echo "$host" | jq -r .users[$num].pass
+      if [[ "$use_gpg" -eq 0 ]]; then
+        num="$3"
+        ((--num))
+        echo "$host" | jq -r .users[$num].pass
+      else
+        num="$3"
+        ((--num))
+        pwnm=$(echo "$host" | jq -r .users[$num].pass)
+        pass "$pwnm"
+      fi
     fi
   elif [[ $# -eq 1 ]]; then
     if ! [[ -f "$cache/$1" ]]; then
@@ -344,7 +414,7 @@ elif [[ -f "$hosts/$1.json" ]]; then
           portnums=$(echo "$ports" | jq -r .[].number)
           portnames=$(echo "$ports" | jq -r .[].service)
           echo PORTS: | bold
-          paste <(echo "$portnums" | sd '$' '​') <(echo "$portnames") | column -t -s '​' -o ' -' | head -n -1 | sort -g
+          glue -s '  -  ' "$portnums" "$portnames"
           echo
         fi
         users=$(echo "$host" | jq -r .users)
@@ -352,8 +422,15 @@ elif [[ -f "$hosts/$1.json" ]]; then
           names=$(echo "$users" | jq -r .[].name)
           passes=$(echo "$users" | jq -r .[].pass)
           echo USERS: | bold
-          paste <(echo "$names" | sd '$' '​') <(echo "$passes") | column -t -s '​' -o ' -' | head -n -1
-          echo
+          if [[ "$use_gpg" -eq 0 ]]; then
+            glue -s '  -  ' "$names" "$passes"
+            echo
+          else
+            pwnms="$passes"
+            passes=$(for x in $pwnms; do pass "$x"; done)
+            glue -s '  -  ' "$names" "$passes"
+            echo
+          fi
         fi
         todo=$(echo "$host" | jq -r .todo)
         if [[ "$todo" != '[]' ]]; then
@@ -375,13 +452,38 @@ elif [[ -f "$hosts/$1.json" ]]; then
     cat "$cache/$1"
   fi
 elif [[ "$1" == 'all' ]]; then
+  n=2
+  cols=$(tput cols)
   if [[ -n "$2" ]]; then
-    list=$(doc list | rg "$2" | head -n 6 | cut -d '-' -f 1 | tr -d ' ')
-    multidoc "$list"
+    list=$(doc list | rg "$2" | cut -d '-' -f 1 | tr -d ' ')
   else
-    list=$(doc list | head -n 6 | cut -d '-' -f 1 | tr -d ' ')
-    multidoc "$list"
+    list=$(doc list | cut -d '-' -f 1 | tr -d ' ')
   fi
+  count=$(echo "$list" | wc -l)
+  if [[ "$count" -eq 1 ]]; then
+    doc "$list"
+    exit
+  fi
+  while [[ -n "$list" ]]; do
+    chunk=$(echo "$list" | head -n "$n" )
+    next=$(multidoc "$chunk")
+    last=''
+    nlen=$(echo "$next" | unbold | maxc) 
+    while [[ "$nlen" -lt "$cols" && "$n" -lt "$count" ]]; do
+      ((++n))
+      chunk=$(echo "$list" | head -n "$n")
+      last="$next"
+      next=$(multidoc "$chunk")
+      nlen=$(echo "$next" | unbold | maxc)
+    done
+    if [[ "$nlen" -gt "$cols" ]]; then
+      next="$last"
+    fi
+    echo "$next"
+    echo
+    list=$(echo "$list" | sed 1,"$n"d)
+    count=$(echo "$list" | wc -l)
+  done
 elif [[ "$1" == 'list' ]]; then
   files=$(ls "$hosts" | rg '\.json$')
   names=$(echo "$files" | sd '.json$' '')
@@ -402,7 +504,7 @@ elif [[ "$1" == 'list' ]]; then
       fi
     done <<< $(echo "$files")
   else
-    paste <(echo "$names" | sd '$' '​') <(echo "$ips") | column -t -s '​' -o '  -' | head -n -1 | sort -g
+    glue -s '  -  ' "$names" "$ips"
   fi
 elif [[ "$1" == 'target' ]]; then
   echo "$2" > "$hosts/target"
