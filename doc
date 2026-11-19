@@ -497,7 +497,6 @@ elif [[ "$1" == 'all' ]]; then
     echo "$next"
     echo
     list=$(echo "$list" | sed 1,"$n"d)
-#    echo -e "CHUNK:\n$chunk\nLIST:\n$list\nLENGTH: $nlen / $cols\n\n"
   done
 elif [[ "$1" == 'list' ]]; then
   files=$(ls "$hosts" | rg '\.json$')
