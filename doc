@@ -471,12 +471,14 @@ elif [[ "$1" == 'all' ]]; then
   else
     list=$(doc list | cut -d '-' -f 1 | tr -d ' ')
   fi
-  count=$(echo "$list" | wc -l)
-  if [[ "$count" -eq 1 ]]; then
-    doc "$list"
-    exit
-  fi
   while [[ -n "$list" ]]; do
+    count=$(echo "$list" | wc -l)
+    if [[ "$count" -eq 1 ]]; then
+      doc "$list"
+      exit
+    else
+      n=2
+    fi
     chunk=$(echo "$list" | head -n "$n" )
     next=$(multidoc "$chunk")
     last=''
@@ -490,11 +492,12 @@ elif [[ "$1" == 'all' ]]; then
     done
     if [[ "$nlen" -gt "$cols" ]]; then
       next="$last"
+      ((--n))
     fi
     echo "$next"
     echo
     list=$(echo "$list" | sed 1,"$n"d)
-    count=$(echo "$list" | wc -l)
+#    echo -e "CHUNK:\n$chunk\nLIST:\n$list\nLENGTH: $nlen / $cols\n\n"
   done
 elif [[ "$1" == 'list' ]]; then
   files=$(ls "$hosts" | rg '\.json$')
